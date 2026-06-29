@@ -1,0 +1,28 @@
+# Environments
+.env
+.env.*
+!.env.example
+.venv
+env/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Telegram Session Files (Very Important)
+*.session
+*.session-journal
+
+# Project Specific Folders & Files
+downloads/
+failed_links.txt
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
