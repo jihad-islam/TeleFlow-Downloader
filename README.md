@@ -1,129 +1,322 @@
 # 🚀 TeleFlow Downloader
 
-A powerful, hybrid Telegram media downloader built with Python and Telethon. TeleFlow Downloader operates in two distinct modes: a **CLI Mode** for bulk downloading from a list of links, and a seamless **Bot Mode** that runs in the background and acts as your personal cloud storage assistant.
+A powerful Telegram media downloader built with **Python** and **Telethon**.
 
-## ✨ Key Features
+TeleFlow Downloader supports two modes:
 
-* **Hybrid Architecture:** Choose between terminal-based bulk downloading or a silent background bot.
-* **Cloud Storage Mode (Bot):** Forward any Telegram link to your "Saved Messages". The script downloads it, re-uploads it as a native media file, and instantly deletes the local copy to save your PC's storage.
-* **Remote Control:** Safely shut down the background script anytime by simply sending `/stop` in your Saved Messages.
-* **Parallel Processing:** Uses `asyncio` to handle multiple downloads concurrently with a configurable queue limit.
-* **Clean Terminal UI:** Real-time, single-line progress bars for both downloading and uploading operations.
-* **Docker Ready:** Fully containerized setup for easy deployment on any server or local machine without manual environment configuration.
+* **CLI Mode** – Download multiple Telegram media files from a list of links.
+* **Bot Mode** – Turn your Telegram **Saved Messages** into a personal cloud storage assistant that automatically downloads and re-uploads media.
+
+---
+
+## ✨ Features
+
+* 📥 Bulk download Telegram media using a list of links
+* 🤖 Background Bot Mode
+* ☁️ Automatically upload downloaded files to **Saved Messages**
+* 🗑️ Delete local files after successful upload to save disk space
+* ⚡ Parallel downloads with configurable concurrency
+* 📊 Clean real-time progress bars for downloading and uploading
+* 🛑 Gracefully stop the bot remotely using `/stop`
+* 🐳 Docker support
+* 🔒 Secure local Telegram session management
+
+---
 
 ## 📁 Project Structure
 
 ```text
-tg-downloader/
-├── docker/                     # Docker configuration files
-│   ├── docker-compose.yml
-│   └── Dockerfile
-├── src/                        # Core application logic
-│   ├── __init__.py             
+TeleFlow-Downloader/
+├── docker/
+│   ├── Dockerfile
+│   └── docker-compose.yml
+│
+├── src/
+│   ├── __init__.py
 │   ├── config.py
-│   ├── utils.py
-│   └── downloader.py
-├── .env                        # Environment variables (API Credentials)
-├── .gitignore                  
-├── requirements.txt            # Python dependencies
-├── links.txt                   # URL list for CLI mode
-└── main.py                     # Application entry point
-
+│   ├── downloader.py
+│   └── utils.py
+│
+├── downloads/
+├── links.txt
+├── .env
+├── .gitignore
+├── requirements.txt
+├── main.py
+└── README.md
 ```
 
-## ⚙️ Prerequisites
+---
 
-* **Python 3.11+** (If running manually)
-* **Docker & Docker Compose** (If using the containerized setup)
-* **Telegram API Credentials:** You need an `API_ID` and `API_HASH` from [my.telegram.org](https://my.telegram.org).
+# ⚙️ Requirements
 
-## 🛠️ Installation & Setup
+* Python **3.11+**
+* Telegram API credentials (`API_ID` & `API_HASH`)
+* Docker (optional)
 
-**1. Clone the repository:**
+---
+
+# 🔑 Get Telegram API Credentials
+
+Telethon requires your own Telegram API credentials.
+
+1. Visit **https://my.telegram.org**
+2. Log in using your Telegram account.
+3. Open **API Development Tools**.
+4. Create a new application.
+5. Copy your:
+
+* `API_ID`
+* `API_HASH`
+
+Create a `.env` file in the project root:
+
+```env
+API_ID=your_api_id
+API_HASH=your_api_hash
+```
+
+---
+
+# 🛠 Installation
+
+## Clone the repository
 
 ```bash
 git clone https://github.com/jihad-islam/TeleFlow-Downloader.git
-cd tg-downloader
 
+cd TeleFlow-Downloader
 ```
 
-**2. Configure Environment Variables:**
-Create a `.env` file in the root directory and add your Telegram API credentials:
+---
 
-```env
-API_ID=your_api_id_here
-API_HASH=your_api_hash_here
+## Create Virtual Environment
 
-```
-## 🔑 How to get API_ID and API_HASH
-
-To use this script, you must generate your own Telegram API credentials. It's free and takes only a minute:
-
-1. Go to [my.telegram.org](https://my.telegram.org) and log in with your Telegram phone number.
-2. Click on **"API development tools"**.
-3. A form will appear. Fill in the **App title** and **Short name** (you can write anything, e.g., `MyDownloaderApp`). Leave the URL field empty and select your platform.
-4. Click on **"Create application"**.
-5. You will now see your **`api_id`** and **`api_hash`**. Copy these values.
-6. Create a `.env` file in the root folder of this project and paste them like this:
-   ```env
-   API_ID=your_api_id_here
-   API_HASH=your_api_hash_here
-
-
-### Option A: Run via Docker (Recommended)
-
-You can easily spin up the project in the background using Docker. The default command runs the script in `bot` mode.
-
-```bash
-docker-compose -f docker/docker-compose.yml up -d
-
-```
-
-*To view logs:* `docker logs -f tg_downloader_bot`
-*To stop:* `docker-compose -f docker/docker-compose.yml down`
-
-### Option B: Manual Setup (Local PC)
-
-Create a virtual environment and install the required dependencies:
+Linux/macOS
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
-pip install -r requirements.txt
 
+source .venv/bin/activate
 ```
 
-## 🚀 Usage
+Windows
 
-### 1. CLI Mode (Bulk Download)
+```powershell
+python -m venv .venv
 
-Add your Telegram links to `links.txt` (one link per line), then run:
+.venv\Scripts\activate
+```
+
+---
+
+## Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Python 3.14 Users
+
+If you're using Python **3.14 or newer**, update Telethon to the latest version:
+
+```bash
+pip install -U telethon
+```
+
+Older Telethon releases may produce asyncio-related errors on Python 3.14.
+
+---
+
+# 🔐 First Login
+
+The first time you run the application, Telethon will ask for:
+
+* Phone number
+* Verification code
+* Two-step password (if enabled)
+
+After successful authentication, a local session file is created automatically:
+
+```text
+my_account_session.session
+```
+
+As long as this file exists, you won't need to log in again on that device.
+
+> **Note**
+>
+> If you use multiple computers, each device should keep its own session file.
+
+---
+
+# 🚀 Usage
+
+## CLI Mode
+
+Add Telegram links to `links.txt` (one link per line).
+
+Example:
+
+```text
+https://t.me/channel/123
+https://t.me/channel/124
+https://t.me/channel/125
+```
+
+Run:
 
 ```bash
 python main.py --mode cli
-
 ```
 
-The script will concurrently download all media files into the `downloads/` folder with a clean progress bar.
+The downloader will:
 
-### 2. Bot Mode (Cloud Storage Assistant)
+* Read every link
+* Download files concurrently
+* Save them into the `downloads/` directory
 
-Run the script in bot mode to keep it listening in the background:
+---
+
+## Bot Mode
+
+Start the background bot:
 
 ```bash
 python main.py --mode bot
-
 ```
 
-* Go to your Telegram app.
-* Send or forward any media link to your **Saved Messages**.
-* The script will automatically process the link, upload the media directly into your Saved Messages, and delete the temporary local file.
-* Send `/stop` to gracefully shut down the application.
+Now simply:
 
-## 🤝 Contributing
+1. Open Telegram.
+2. Go to **Saved Messages**.
+3. Send or forward a Telegram media link.
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://www.google.com/search?q=https://github.com/your_username/tg-downloader/issues).
+The bot will automatically:
 
-## 📜 License
+* Download the media
+* Upload it back to Saved Messages
+* Delete the local copy
 
-This project is licensed under the MIT License.
+To stop the bot remotely:
+
+```text
+/stop
+```
+
+---
+
+# 🐳 Docker
+
+Run in background:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+View logs:
+
+```bash
+docker logs -f tg_downloader_bot
+```
+
+Stop:
+
+```bash
+docker compose -f docker/docker-compose.yml down
+```
+
+---
+
+# ⚡ Parallel Downloads
+
+The downloader supports concurrent downloads using **asyncio**.
+
+You can place many links inside `links.txt`.
+
+Example:
+
+```
+10 links
+↓
+Only 2 downloads run simultaneously
+↓
+Remaining links wait in the queue
+↓
+When one finishes, the next starts automatically
+```
+
+This keeps resource usage low while improving download speed.
+
+---
+
+# 📦 Output
+
+CLI Mode:
+
+```text
+downloads/
+├── video1.mp4
+├── file.pdf
+└── image.jpg
+```
+
+Bot Mode:
+
+```text
+Downloaded
+      ↓
+Uploaded to Saved Messages
+      ↓
+Local file deleted automatically
+```
+
+---
+
+# 🛠 Troubleshooting
+
+### `RuntimeError: There is no current event loop`
+
+Update Telethon:
+
+```bash
+pip install -U telethon
+```
+
+This commonly occurs when using older Telethon versions with Python 3.14.
+
+---
+
+### Login requested every time
+
+Make sure the generated `.session` file is not deleted.
+
+---
+
+### Invalid API_ID or API_HASH
+
+Verify your `.env` configuration.
+
+---
+
+### Media cannot be downloaded
+
+Possible reasons:
+
+* Private channel access required
+* Deleted message
+* Invalid Telegram link
+
+---
+
+# 🤝 Contributing
+
+Contributions, feature requests, and pull requests are welcome.
+
+If you discover a bug or have an idea for an improvement, feel free to open an issue.
+
+---
+
+# 📄 License
+
+This project is licensed under the **MIT License**.
