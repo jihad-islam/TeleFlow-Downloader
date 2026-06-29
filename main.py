@@ -8,6 +8,12 @@ from telethon import TelegramClient, events
 
 from src.config import API_ID, API_HASH, LINKS_FILE, MAX_CONCURRENT_DOWNLOADS
 from src.downloader import download_link
+from src.utils import (
+    ProgressCallback,
+    TelegramStatusProgressReporter,
+    reset_status_progress_reporter,
+    set_status_progress_reporter,
+)
 
 
 def get_phone():
@@ -93,7 +99,18 @@ async def run_bot(client):
 
     async def process_bot_download(client, event, link, semaphore):
         status_message = await client.send_message("me", "⏳ Downloading...")
-        path = await download_link(client, link, semaphore)
+
+        download_reporter = TelegramStatusProgressReporter(
+            status_message,
+            action="Downloading",
+        )
+        token = set_status_progress_reporter(download_reporter)
+        try:
+            path = await download_link(client, link, semaphore)
+        finally:
+            reset_status_progress_reporter(token)
+            download_reporter.stop()
+            await download_reporter.wait()
 
         if not path:
             await status_message.edit("❌ Download failed")
@@ -108,14 +125,30 @@ async def run_bot(client):
         await asyncio.sleep(1)
         await status_message.edit("⏫ Uploading...")
 
+        upload_reporter = TelegramStatusProgressReporter(
+            status_message,
+            action="Uploading",
+        )
+        token = set_status_progress_reporter(upload_reporter)
         try:
-            await client.send_file("me", path)
+            await client.send_file(
+                "me",
+                path,
+                progress_callback=ProgressCallback(file_name, action="Uploading"),
+            )
         except Exception as e:
+            upload_reporter.stop()
+            await upload_reporter.wait()
             await status_message.edit("❌ Upload failed")
             await asyncio.sleep(5)
             await status_message.delete()
             print(f"❌ Upload failed for {file_name}: {e}")
             return
+        finally:
+            reset_status_progress_reporter(token)
+
+        upload_reporter.stop()
+        await upload_reporter.wait()
 
         await status_message.edit("✅ Upload complete")
         await asyncio.sleep(2)
