@@ -8,7 +8,6 @@ from telethon import TelegramClient, events
 
 from src.config import API_ID, API_HASH, LINKS_FILE, MAX_CONCURRENT_DOWNLOADS
 from src.downloader import download_link
-from src.utils import ProgressCallback
 
 
 def get_phone():
@@ -93,29 +92,40 @@ async def run_bot(client):
             asyncio.create_task(process_bot_download(client, event, full_link, semaphore))
 
     async def process_bot_download(client, event, link, semaphore):
+        status_message = await client.send_message("me", "⏳ Downloading...")
         path = await download_link(client, link, semaphore)
 
-        if path:
-            file_name = os.path.basename(path)
-            upload_progress = ProgressCallback(file_name, action="Uploading")
-
-            try:
-                await client.send_file(
-                    "me",
-                    path,
-                    progress_callback=upload_progress,
-                )
-
-                os.remove(path)
-                print(f"✅ Auto-deleted from PC: {file_name}")
-
-                await event.delete()
-                print("🗑️ Deleted original link from Saved Messages.")
-
-            except Exception as e:
-                print(f"❌ Upload failed for {file_name}: {e}")
-        else:
+        if not path:
+            await status_message.edit("❌ Download failed")
+            await asyncio.sleep(5)
+            await status_message.delete()
             print(f"❌ Process failed for link: {link}")
+            return
+
+        file_name = os.path.basename(path)
+
+        await status_message.edit("✅ Download complete")
+        await asyncio.sleep(1)
+        await status_message.edit("⏫ Uploading...")
+
+        try:
+            await client.send_file("me", path)
+        except Exception as e:
+            await status_message.edit("❌ Upload failed")
+            await asyncio.sleep(5)
+            await status_message.delete()
+            print(f"❌ Upload failed for {file_name}: {e}")
+            return
+
+        await status_message.edit("✅ Upload complete")
+        await asyncio.sleep(2)
+        await status_message.delete()
+
+        os.remove(path)
+        print(f"✅ Auto-deleted from PC: {file_name}")
+
+        await event.delete()
+        print("🗑️ Deleted original link from Saved Messages.")
 
     await client.run_until_disconnected()
 
