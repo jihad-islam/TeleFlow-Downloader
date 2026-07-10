@@ -9,6 +9,7 @@ _status_progress_reporter = contextvars.ContextVar(
     "status_progress_reporter",
     default=None,
 )
+_terminal_progress_display = None
 
 
 def log_failed_link(link, error_msg):
@@ -30,17 +31,19 @@ def reset_status_progress_reporter(token):
 class TelegramStatusProgressReporter:
     """Rate-limited Telegram status message updater for transfer progress."""
 
-    def __init__(self, status_message, action, min_interval=60):
+    def __init__(self, status_message, action, min_interval=5):
         self.status_message = status_message
         self.action = action
         self.min_interval = min_interval
         self.last_edit_time = 0
         self.edit_task = None
         self.active = True
+        self.transfers = {}
 
     def set_action(self, action):
         self.action = action
         self.last_edit_time = 0
+        self.transfers.clear()
 
     def stop(self):
         self.active = False
@@ -62,16 +65,62 @@ class TelegramStatusProgressReporter:
 
         percent = current * 100 / total if total else 0
         icon = "⏫" if self.action == "Uploading" else "⏳"
-        text = (
-            f"{icon} {self.action}...\n\n"
-            f"{filename}\n\n"
-            f"Progress: {percent:.0f}%\n"
-            f"Size: {format_size(current)} / {format_size(total)}\n"
-            f"Speed: {speed / 1024 / 1024:.1f} MB/s"
-        )
+        self.transfers[filename] = {
+            "current": current,
+            "total": total,
+            "percent": percent,
+            "speed": speed,
+            "updated_at": now,
+            "complete": current == total,
+        }
+        text = self._render_status(icon)
 
         self.last_edit_time = now
         self.edit_task = asyncio.create_task(self._edit(text))
+
+    def _render_status(self, icon):
+        transfers = sorted(
+            self.transfers.items(),
+            key=lambda item: item[1]["updated_at"],
+            reverse=True,
+        )
+        active_transfers = [
+            item for item in transfers if not item[1]["complete"]
+        ]
+        completed_count = len(transfers) - len(active_transfers)
+        visible_transfers = (active_transfers or transfers)[:5]
+        active_count = len(active_transfers)
+
+        if active_count:
+            file_label = "file" if active_count == 1 else "files"
+            header = f"{icon} {self.action} {active_count} active {file_label}"
+            if completed_count:
+                header = f"{header}, {completed_count} done"
+        else:
+            header = f"{icon} {self.action} complete"
+
+        lines = [header]
+
+        for filename, state in visible_transfers:
+            short_name = shorten_filename(filename, 42)
+            lines.extend(
+                [
+                    "",
+                    short_name,
+                    (
+                        f"{state['percent']:.0f}% | "
+                        f"{format_size(state['current'])} / "
+                        f"{format_size(state['total'])} | "
+                        f"{state['speed'] / 1024 / 1024:.1f} MB/s"
+                    ),
+                ]
+            )
+
+        hidden_count = len(active_transfers) - len(visible_transfers)
+        if hidden_count > 0:
+            lines.extend(["", f"+ {hidden_count} more"])
+
+        return "\n".join(lines)
 
     async def _edit(self, text):
         if not self.active:
@@ -81,6 +130,17 @@ class TelegramStatusProgressReporter:
             await self.status_message.edit(text)
         except Exception:
             pass
+
+
+def shorten_filename(filename, max_length):
+    """Keep long filenames readable in terminal and Telegram status text."""
+    if len(filename) <= max_length:
+        return filename
+
+    if max_length <= 3:
+        return filename[:max_length]
+
+    return f"{filename[: max_length - 3]}..."
 
 
 def format_size(size):
@@ -96,12 +156,81 @@ def format_size(size):
         value /= 1024
 
 
+class TerminalProgressDisplay:
+    """Render a small fixed set of live progress lines in the terminal."""
+
+    def __init__(self, max_lines=2):
+        self.max_lines = max_lines
+        self.transfers = {}
+        self.rendered_lines = 0
+
+    def update(self, key, action, filename, current, total, speed):
+        percent = current * 100 / total if total else 0
+        complete = current == total
+        now = time.time()
+        self.transfers[key] = {
+            "action": action,
+            "filename": filename,
+            "current": current,
+            "total": total,
+            "percent": percent,
+            "speed": speed,
+            "updated_at": now,
+            "complete": complete,
+        }
+
+        self._render()
+
+        if complete:
+            self.transfers.pop(key, None)
+            if not self.transfers:
+                self.rendered_lines = 0
+
+    def _render(self):
+        transfers = sorted(
+            self.transfers.values(),
+            key=lambda state: state["updated_at"],
+            reverse=True,
+        )
+        visible_transfers = transfers[: self.max_lines]
+
+        if self.rendered_lines:
+            sys.stdout.write(f"\033[{self.rendered_lines}F")
+
+        for state in visible_transfers:
+            line = (
+                f"[{state['action']}] "
+                f"{shorten_filename(state['filename'], 42)} | "
+                f"{state['percent']:.2f}% | "
+                f"{format_size(state['current'])}/{format_size(state['total'])} | "
+                f"{state['speed'] / 1024 / 1024:.2f} MB/s"
+            )
+            sys.stdout.write(f"{line}\033[K\n")
+
+        for _ in range(self.rendered_lines - len(visible_transfers)):
+            sys.stdout.write("\033[K\n")
+
+        sys.stdout.flush()
+        self.rendered_lines = len(visible_transfers)
+
+
+def get_terminal_progress_display():
+    """Return the shared terminal progress display."""
+    global _terminal_progress_display
+
+    if _terminal_progress_display is None:
+        _terminal_progress_display = TerminalProgressDisplay()
+
+    return _terminal_progress_display
+
+
 class ProgressCallback:
     """Terminal progress reporter compatible with Telethon callbacks."""
 
     def __init__(self, filename, action="Downloading"):
         self.filename = filename
         self.action = action
+        self.key = f"{action}:{filename}:{id(self)}"
         self.start_time = time.time()
         self.last_print_time = 0
 
@@ -110,18 +239,16 @@ class ProgressCallback:
         if now - self.last_print_time >= 1 or current == total:
             elapsed = now - self.start_time
             speed = current / elapsed if elapsed > 0 else 0
-            percent = current * 100 / total if total else 0
             reporter = _status_progress_reporter.get()
 
-            sys.stdout.write(
-                f"\r[{self.action}] {self.filename[:20]}... | {percent:.2f}% | "
-                f"{current/1024/1024:.2f}/{total/1024/1024:.2f} MB | "
-                f"{speed/1024/1024:.2f} MB/s \033[K"
+            get_terminal_progress_display().update(
+                self.key,
+                self.action,
+                self.filename,
+                current,
+                total,
+                speed,
             )
-            sys.stdout.flush()
             self.last_print_time = now
             if reporter:
                 reporter.update(self.filename, current, total, speed)
-
-            if current == total:
-                print()

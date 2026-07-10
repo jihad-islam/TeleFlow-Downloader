@@ -118,6 +118,16 @@ def chunk_items(items, size):
         yield items[index : index + size]
 
 
+async def upload_file_with_limit(client, path, semaphore):
+    """Upload one file to Telegram while respecting the shared transfer limit."""
+    async with semaphore:
+        file_name = os.path.basename(path)
+        return await client.upload_file(
+            path,
+            progress_callback=ProgressCallback(file_name, action="Uploading"),
+        )
+
+
 def print_startup_info(link_count):
     """Print the CLI batch startup information."""
     print()
@@ -350,14 +360,19 @@ async def run_bot(client):
         token = set_status_progress_reporter(upload_reporter)
         try:
             if is_group_upload:
-                for upload_chunk in chunk_items(upload_target, 10):
+                upload_tasks = [
+                    asyncio.create_task(
+                        upload_file_with_limit(client, path, semaphore)
+                    )
+                    for path in upload_target
+                ]
+                uploaded_files = await asyncio.gather(*upload_tasks)
+                await status_message.edit("⏫ Sending grouped media...")
+
+                for upload_chunk in chunk_items(uploaded_files, 10):
                     await client.send_file(
                         "me",
                         upload_chunk,
-                        progress_callback=ProgressCallback(
-                            file_name,
-                            action="Uploading",
-                        ),
                         **upload_options,
                     )
             else:
