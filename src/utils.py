@@ -162,12 +162,16 @@ class TerminalProgressDisplay:
     def __init__(self, max_lines=2):
         self.max_lines = max_lines
         self.transfers = {}
+        self.order = []
         self.rendered_lines = 0
 
     def update(self, key, action, filename, current, total, speed):
         percent = current * 100 / total if total else 0
         complete = current == total
         now = time.time()
+        if key not in self.transfers:
+            self.order.append(key)
+
         self.transfers[key] = {
             "action": action,
             "filename": filename,
@@ -183,15 +187,18 @@ class TerminalProgressDisplay:
 
         if complete:
             self.transfers.pop(key, None)
+            if key in self.order:
+                self.order.remove(key)
             if not self.transfers:
+                self.order.clear()
                 self.rendered_lines = 0
 
     def _render(self):
-        transfers = sorted(
-            self.transfers.values(),
-            key=lambda state: state["updated_at"],
-            reverse=True,
-        )
+        transfers = [
+            self.transfers[key]
+            for key in self.order
+            if key in self.transfers
+        ]
         visible_transfers = transfers[: self.max_lines]
 
         if self.rendered_lines:
