@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import dataclass
 
 from telethon import TelegramClient
 from telethon.tl.types import Channel, User
@@ -8,7 +9,20 @@ from src.config import DOWNLOAD_FOLDER
 from src.utils import log_failed_link, ProgressCallback
 
 
-async def download_link(client: TelegramClient, link: str, semaphore):
+@dataclass
+class DownloadedMedia:
+    """Downloaded media path plus the source Telegram message metadata."""
+
+    path: str
+    message: object
+
+
+async def download_link(
+    client: TelegramClient,
+    link: str,
+    semaphore,
+    include_message: bool = False,
+):
     """Download a single Telegram message media item into its chat folder."""
     async with semaphore:
         private = re.search(r"t\.me/c/(\d+)/(\d+)", link)
@@ -52,6 +66,8 @@ async def download_link(client: TelegramClient, link: str, semaphore):
 
             if os.path.exists(file_path):
                 print(f"\n⏭️ Already downloaded, skipping: {file_name}")
+                if include_message:
+                    return DownloadedMedia(file_path, message)
                 return file_path
 
             print(f"\n⬇️ Task Started: {file_name} (from {folder_name})")
@@ -63,6 +79,8 @@ async def download_link(client: TelegramClient, link: str, semaphore):
                 progress_callback=progress,
             )
 
+            if include_message:
+                return DownloadedMedia(path, message)
             return path
 
         except Exception as e:

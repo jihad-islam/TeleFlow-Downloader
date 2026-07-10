@@ -53,6 +53,71 @@ def format_duration(seconds):
     return f"{minutes:02d}m {seconds:02d}s"
 
 
+def is_video_media(message, path):
+    """Return True when a downloaded file should be uploaded as Telegram video."""
+    message_file = getattr(message, "file", None)
+    mime_type = getattr(message_file, "mime_type", "") or ""
+    if mime_type.startswith("video/"):
+        return True
+
+    video_extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"}
+    return os.path.splitext(path)[1].lower() in video_extensions
+
+
+async def download_video_thumbnail(client, message, path):
+    """Download the source video thumbnail so re-upload keeps a visual preview."""
+    thumb_path = f"{path}.thumb.jpg"
+
+    try:
+        downloaded_thumb = await client.download_media(
+            message,
+            thumb=-1,
+            file=thumb_path,
+        )
+    except Exception:
+        return None
+
+    if downloaded_thumb and os.path.exists(downloaded_thumb):
+        return downloaded_thumb
+    return None
+
+
+def get_video_upload_options(message, path, thumb_path):
+    """Build Telethon send_file options that keep videos playable in chat."""
+    if not is_video_media(message, path):
+        return {}
+
+    document = getattr(message, "document", None)
+    attributes = getattr(document, "attributes", None)
+    options = {
+        "force_document": False,
+        "supports_streaming": True,
+    }
+
+    if attributes:
+        options["attributes"] = attributes
+
+    if thumb_path:
+        options["thumb"] = thumb_path
+
+    return options
+
+
+def normalize_telegram_link(link_suffix):
+    """Return a full Telegram URL from a matched message link."""
+    return (
+        f"https://{link_suffix}"
+        if not link_suffix.startswith("http")
+        else link_suffix
+    )
+
+
+def chunk_items(items, size):
+    """Yield fixed-size chunks from a list."""
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
+
+
 def print_startup_info(link_count):
     """Print the CLI batch startup information."""
     print()
@@ -218,15 +283,10 @@ async def run_bot(client):
 
         print(f"\n🔗 Bot received {len(links)} link(s). Processing...")
 
-        for link_suffix in links:
-            full_link = (
-                f"https://{link_suffix}"
-                if not link_suffix.startswith("http")
-                else link_suffix
-            )
-            asyncio.create_task(process_bot_download(client, event, full_link, semaphore))
+        full_links = [normalize_telegram_link(link_suffix) for link_suffix in links]
+        asyncio.create_task(process_bot_downloads(client, event, full_links, semaphore))
 
-    async def process_bot_download(client, event, link, semaphore):
+    async def process_bot_downloads(client, event, links, semaphore):
         status_message = await client.send_message("me", "⏳ Downloading...")
 
         download_reporter = TelegramStatusProgressReporter(
@@ -235,24 +295,53 @@ async def run_bot(client):
         )
         token = set_status_progress_reporter(download_reporter)
         try:
-            path = await download_link(client, link, semaphore)
+            download_tasks = [
+                asyncio.create_task(
+                    download_link(
+                        client,
+                        link,
+                        semaphore,
+                        include_message=True,
+                    )
+                )
+                for link in links
+            ]
+            downloaded_items = await asyncio.gather(*download_tasks)
         finally:
             reset_status_progress_reporter(token)
             download_reporter.stop()
             await download_reporter.wait()
 
-        if not path:
+        downloaded_items = [item for item in downloaded_items if item]
+        if not downloaded_items:
             await status_message.edit("❌ Download failed")
             await asyncio.sleep(5)
             await status_message.delete()
-            print(f"❌ Process failed for link: {link}")
+            print(f"❌ Process failed for {len(links)} link(s).")
             return
 
-        file_name = os.path.basename(path)
+        paths = [item.path for item in downloaded_items]
+        is_group_upload = len(paths) > 1
+        file_name = os.path.basename(paths[0])
 
         await status_message.edit("✅ Download complete")
         await asyncio.sleep(1)
         await status_message.edit("⏫ Uploading...")
+
+        thumb_path = None
+        upload_target = paths
+        upload_options = {
+            "force_document": False,
+            "supports_streaming": True,
+        }
+
+        if not is_group_upload:
+            source_message = downloaded_items[0].message
+            path = paths[0]
+            if is_video_media(source_message, path):
+                thumb_path = await download_video_thumbnail(client, source_message, path)
+            upload_target = path
+            upload_options = get_video_upload_options(source_message, path, thumb_path)
 
         upload_reporter = TelegramStatusProgressReporter(
             status_message,
@@ -260,21 +349,36 @@ async def run_bot(client):
         )
         token = set_status_progress_reporter(upload_reporter)
         try:
-            await client.send_file(
-                "me",
-                path,
-                progress_callback=ProgressCallback(file_name, action="Uploading"),
-            )
+            if is_group_upload:
+                for upload_chunk in chunk_items(upload_target, 10):
+                    await client.send_file(
+                        "me",
+                        upload_chunk,
+                        progress_callback=ProgressCallback(
+                            file_name,
+                            action="Uploading",
+                        ),
+                        **upload_options,
+                    )
+            else:
+                await client.send_file(
+                    "me",
+                    upload_target,
+                    progress_callback=ProgressCallback(file_name, action="Uploading"),
+                    **upload_options,
+                )
         except Exception as e:
             upload_reporter.stop()
             await upload_reporter.wait()
             await status_message.edit("❌ Upload failed")
             await asyncio.sleep(5)
             await status_message.delete()
-            print(f"❌ Upload failed for {file_name}: {e}")
+            print(f"❌ Upload failed for {len(downloaded_items)} file(s): {e}")
             return
         finally:
             reset_status_progress_reporter(token)
+            if thumb_path and os.path.exists(thumb_path):
+                os.remove(thumb_path)
 
         upload_reporter.stop()
         await upload_reporter.wait()
@@ -283,8 +387,10 @@ async def run_bot(client):
         await asyncio.sleep(2)
         await status_message.delete()
 
-        os.remove(path)
-        print(f"✅ Auto-deleted from PC: {file_name}")
+        for path in dict.fromkeys(paths):
+            if os.path.exists(path):
+                os.remove(path)
+        print(f"✅ Auto-deleted from PC: {len(paths)} file(s)")
 
         await event.delete()
         print("🗑️ Deleted original link from Saved Messages.")
