@@ -33,6 +33,9 @@ TeleFlow-Downloader/
 │
 ├── src/
 │   ├── __init__.py
+│   ├── application.py
+│   ├── bot.py
+│   ├── cli.py
 │   ├── config.py
 │   ├── downloader.py
 │   └── utils.py

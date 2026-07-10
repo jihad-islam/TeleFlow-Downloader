@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from dataclasses import dataclass
@@ -15,6 +16,33 @@ class DownloadedMedia:
 
     path: str
     message: object
+
+
+async def download_links_with_limit(
+    client: TelegramClient,
+    links: list[str],
+    semaphore,
+    batch_size: int,
+    include_message: bool = False,
+):
+    """Download links in batches matching the configured concurrency limit."""
+    results = []
+    for index in range(0, len(links), batch_size):
+        batch = links[index : index + batch_size]
+        tasks = [
+            asyncio.create_task(
+                download_link(
+                    client,
+                    link,
+                    semaphore,
+                    include_message=include_message,
+                )
+            )
+            for link in batch
+        ]
+        results.extend(await asyncio.gather(*tasks))
+
+    return results
 
 
 async def download_link(
