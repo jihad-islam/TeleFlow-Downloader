@@ -118,6 +118,17 @@ def chunk_items(items, size):
         yield items[index : index + size]
 
 
+def remove_empty_download_folders():
+    """Remove empty subfolders left behind after bot uploads are cleaned up."""
+    for root, dirs, _ in os.walk(DOWNLOAD_FOLDER, topdown=False):
+        for folder_name in dirs:
+            folder_path = os.path.join(root, folder_name)
+            try:
+                os.rmdir(folder_path)
+            except OSError:
+                pass
+
+
 async def upload_file_with_limit(client, path, semaphore):
     """Upload one file to Telegram while respecting the shared transfer limit."""
     async with semaphore:
@@ -405,6 +416,7 @@ async def run_bot(client):
         for path in dict.fromkeys(paths):
             if os.path.exists(path):
                 os.remove(path)
+        remove_empty_download_folders()
         print(f"✅ Auto-deleted from PC: {len(paths)} file(s)")
 
         await event.delete()
